@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual env
+venv/
+.env/
+
+# Builds
+build/
+dist/
+installer/
+*.spec
+
+# Downloads
+downloads/
+
+# FFmpeg binaries
+ffmpeg/
+
+# OS
+.DS_Store
+Thumbs.db
