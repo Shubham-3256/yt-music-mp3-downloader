@@ -20,7 +20,7 @@ class App(ctk.CTk):
 
         self.cancel_event = threading.Event()
         self.download_thread = None
-        self.was_cancelled = False   # 🔥 FIX 1: cancel state flag
+        self.was_cancelled = False
 
         self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(0, weight=1)
@@ -80,7 +80,6 @@ class App(ctk.CTk):
             command=self.select_folder
         ).grid(row=6, column=0, pady=(12, 4))
 
-        # 🔥 FIX 2: show selected output folder
         self.output_label = ctk.CTkLabel(
             content,
             text=f"📂 Output: {self.output_dir}",
@@ -153,6 +152,7 @@ class App(ctk.CTk):
 
         self.progress.set(0)
         self.percent_label.configure(text="0%")
+        self.status_label.configure(text="Status: Downloading...")
 
         self.log_box.configure(state="normal")
         self.log_box.delete("1.0", "end")
@@ -163,14 +163,12 @@ class App(ctk.CTk):
 
         self.download_btn.configure(state="disabled")
         self.cancel_btn.configure(state="normal")
-        self.status_label.configure(text="Status: Downloading...")
 
-        self.download_thread = threading.Thread(
+        threading.Thread(
             target=self.run_download,
             args=(url, quality, single),
             daemon=True
-        )
-        self.download_thread.start()
+        ).start()
 
     def cancel_download(self):
         self.was_cancelled = True
@@ -185,25 +183,27 @@ class App(ctk.CTk):
                 quality,
                 single=single,
                 progress_callback=self.update_progress,
+                summary_callback=self.show_summary,
                 cancel_event=self.cancel_event,
             )
 
-            # ✅ show completed only if not cancelled
             if not self.was_cancelled:
-                self.status_label.configure(text="Status: Completed ✅")
+                self.after(0, lambda: self.status_label.configure(text="Status: Completed ✅"))
 
         except DownloadCancelled:
-            self.status_label.configure(text="Status: Cancelled ❌")
-
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
+            self.after(0, lambda: self.status_label.configure(text="Status: Cancelled ❌"))
 
         finally:
-            self.download_btn.configure(state="normal")
-            self.cancel_btn.configure(state="disabled")
+            self.after(0, lambda: (
+                self.download_btn.configure(state="normal"),
+                self.cancel_btn.configure(state="disabled")
+            ))
 
-    # ===== PROGRESS CALLBACK =====
+    # ===== THREAD-SAFE PROGRESS =====
     def update_progress(self, d):
+        self.after(0, self._update_progress_ui, d)
+
+    def _update_progress_ui(self, d):
         status = d.get("status")
 
         if status == "downloading":
@@ -211,9 +211,16 @@ class App(ctk.CTk):
             filename = d.get("filename", "")
             name = re.sub(r"\.(webm|m4a|mp3)", "", filename.split("/")[-1])
 
+            index = d.get("playlist_index")
+            total = d.get("playlist_count")
+
+            if index and total:
+                self.status_label.configure(text=f"Downloading {index} / {total}")
+
             self.track_label.configure(text=f"🎵 {name}")
+
             try:
-                self.progress.set(max(0.05, float(percent.replace('%', '')) / 100))
+                self.progress.set(float(percent.replace("%", "")) / 100)
                 self.percent_label.configure(text=percent)
             except:
                 pass
@@ -224,6 +231,21 @@ class App(ctk.CTk):
                 self.log_box.configure(state="normal")
                 self.log_box.insert("end", f"✔ {file}\n")
                 self.log_box.configure(state="disabled")
+
+    # ===== FINAL SUMMARY =====
+    def show_summary(self, stats):
+        self.after(0, self._show_summary_ui, stats)
+
+    def _show_summary_ui(self, stats):
+        if self.was_cancelled:
+            return
+
+        messagebox.showinfo(
+            "Download Summary",
+            f"Total tracks: {stats.get('total')}\n"
+            f"Downloaded: {stats.get('downloaded')}\n"
+            f"Skipped / Unavailable: {stats.get('skipped')}"
+        )
 
 
 # ===== APP ENTRY POINT =====
